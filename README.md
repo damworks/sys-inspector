@@ -16,12 +16,51 @@ config/projects/*.yaml  one file per project
 
 ## Setup
 ```bash
-cp .env.example .env          # fill in the values (never commit it)
-pip install -r requirements.txt
-python main.py --project my_project --env production
+git clone git@github.com:damworks/sys-inspector.git
+cd sys-inspector
+
+cp .env.example .env                                            # fill in the values (never commit it)
+cp config/projects/my_project.yaml config/projects/your_project.yaml  # edit: name, paths, patterns, commands
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python main.py --project your_project --env production
 ```
+`config/projects/*.yaml` (except `my_project.yaml`) and `.env` are gitignored: every clone needs its own copies
+with real values, they are never pushed to the repo.
+
+To use the plain `python main.py ...` form, activate the virtualenv first in that shell
+(`source .venv/bin/activate`, then `python main.py ...`; `deactivate` when done).
+
 Options: `--only ssh_disk_usage` (check type or name, repeatable), `--format json`, `--config-dir`, `--env-file`.
 Exit codes: `0` all OK/WARN, `1` at least one FAIL, `2` configuration error (e.g. missing variable).
+
+## Scheduling with cron
+Cron does not run an interactive shell, so it has no `PATH`/venv activation. Always use absolute paths
+(matching where you actually cloned the repo on that machine), redirect output to a log file, and guard
+against overlapping runs with `flock`.
+
+```bash
+#!/bin/bash
+# run_cron.sh
+set -euo pipefail
+cd /opt/sys-inspector        # adjust to your clone path
+
+LOGFILE="/var/log/sys-inspector/$(date +%F).log"
+mkdir -p "$(dirname "$LOGFILE")"
+
+exec flock -n /tmp/sys-inspector.lock \
+  .venv/bin/python main.py \
+    --project your_project --env production \
+    --env-file /opt/sys-inspector/.env \
+    >> "$LOGFILE" 2>&1
+```
+```
+# crontab -e
+0 7 * * * /opt/sys-inspector/run_cron.sh
+```
+`.env` and `config/projects/your_project.yaml` must already exist on that machine (Setup above), and `run_cron.sh`
+needs to be executable (`chmod +x run_cron.sh`).
 
 ## Docker
 ```bash

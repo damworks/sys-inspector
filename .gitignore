@@ -1,0 +1,8 @@
+.env
+.venv/
+.idea/
+__pycache__/
+
+# Only the example project is versioned; real project configs stay local
+config/projects/*
+!config/projects/my_project.yaml

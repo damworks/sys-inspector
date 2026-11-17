@@ -1,0 +1,11 @@
+services:
+  inspector:
+    build: .
+    image: sys-inspector
+    env_file: .env            # secrets injected as environment variables
+    volumes:
+      - ./config:/app/config:ro
+      # ~/.ssh is mounted at the same absolute path as on the host, so the
+      # key / known_hosts paths in .env work both locally and in the container
+      - ${HOME}/.ssh:${HOME}/.ssh:ro
+    # Usage: docker compose run --rm inspector --project my_project --env production

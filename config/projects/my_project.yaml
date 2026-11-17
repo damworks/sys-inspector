@@ -1,0 +1,65 @@
+# No secrets here: only ${VAR} or ${VAR:-default} references.
+name: my_project
+
+# Checks run on all environments
+checks:
+  - name: Disk usage - images and thumbnails
+    type: ssh_disk_usage
+    top: 10
+    paths:            # relative to ssh.workdir
+      - public/var/assets/images
+      - public/var/tmp/thumbnails/images
+
+  - name: Messenger queues
+    type: console_command
+    command: php bin/console messenger:stats
+    expect_exit_code: 0
+    # warn_if_contains: failed
+
+  - name: application_logs tables
+    type: db_table_analysis
+    pattern: "application_logs%"   # LIKE: '_' is a wildcard
+    must_exist: true
+    exact_count: false             # true = SELECT COUNT(*) (slow on large tables)
+    warn_total_mb: 2048
+    fail_total_mb: 10240
+
+environments:
+  staging:
+    ssh:
+      host: ${STAGING_SSH_HOST}
+      port: ${STAGING_SSH_PORT:-22}
+      user: ${STAGING_SSH_USER}
+      key_path: ${STAGING_SSH_KEY_PATH}
+      passphrase: ${STAGING_SSH_KEY_PASSPHRASE:-}
+      known_hosts: ${SSH_KNOWN_HOSTS:-}
+      workdir: ${STAGING_APP_DIR}
+    database:
+      # tunnel: true -> host/port are resolved by the SSH server (not by your PC):
+      #   127.0.0.1 = MySQL on the SSH server itself; otherwise the DB's internal host.
+      #   The tunnel's local port (127.0.0.1:<random>) is handled automatically.
+      tunnel: ${STAGING_DB_TUNNEL:-true}
+      host: ${STAGING_DB_HOST}
+      port: ${STAGING_DB_PORT:-3306}
+      name: ${STAGING_DB_NAME}
+      user: ${STAGING_DB_USER}
+      password: ${STAGING_DB_PASSWORD}
+
+  production:
+    ssh:
+      host: ${PROD_SSH_HOST}
+      port: ${PROD_SSH_PORT:-22}
+      user: ${PROD_SSH_USER}
+      key_path: ${PROD_SSH_KEY_PATH}
+      passphrase: ${PROD_SSH_KEY_PASSPHRASE:-}
+      known_hosts: ${SSH_KNOWN_HOSTS:-}
+      workdir: ${PROD_APP_DIR}
+    database:
+      tunnel: ${PROD_DB_TUNNEL:-true}
+      host: ${PROD_DB_HOST}
+      port: ${PROD_DB_PORT:-3306}
+      name: ${PROD_DB_NAME}
+      user: ${PROD_DB_USER}
+      password: ${PROD_DB_PASSWORD}
+    # Additional checks for this environment only
+    checks: []

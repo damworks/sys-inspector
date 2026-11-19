@@ -3,9 +3,42 @@ services:
     build: .
     image: sys-inspector
     env_file: .env            # secrets injected as environment variables
+    environment:
+      # Overrides .env: inside the compose network the results DB is reached via its
+      # service name, not via the host-facing port used by local/venv runs.
+      RESULTS_DB_HOST: results-db
+      RESULTS_DB_PORT: 3306
+    depends_on:
+      results-db:
+        condition: service_healthy
+        required: false
     volumes:
       - ./config:/app/config:ro
       # ~/.ssh is mounted at the same absolute path as on the host, so the
       # key / known_hosts paths in .env work both locally and in the container
       - ${HOME}/.ssh:${HOME}/.ssh:ro
     # Usage: docker compose run --rm inspector --project my_project --env production
+
+  # Centralized store for check run history. Optional: the app skips saving
+  # results if RESULTS_DB_HOST is empty in .env.
+  results-db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${RESULTS_DB_NAME:-sys_inspector}
+      MARIADB_USER: ${RESULTS_DB_USER:-sys_inspector}
+      MARIADB_PASSWORD: ${RESULTS_DB_PASSWORD:?set RESULTS_DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${RESULTS_DB_ROOT_PASSWORD:?set RESULTS_DB_ROOT_PASSWORD in .env}
+    ports:
+      # Host-facing port, used when running main.py locally via the venv (RESULTS_DB_HOST=127.0.0.1)
+      - "${RESULTS_DB_PORT:-3307}:3306"
+    volumes:
+      - results-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  results-db-data:

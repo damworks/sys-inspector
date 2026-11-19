@@ -6,11 +6,13 @@ import argparse
 import json
 import sys
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core.checks import FAIL, OK, REGISTRY, WARN
 from core.config import ConfigError
 from core.engine import Engine
+from core.results_store import ResultsStore, ResultsStoreError
 
 ICONS = {OK: "✔", WARN: "⚠", FAIL: "✘"}
 
@@ -24,6 +26,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--format", choices=["text", "json"], default="text")
     p.add_argument("--config-dir", type=Path, help="configuration directory (default: ./config)")
     p.add_argument("--env-file", type=Path, help=".env file (default: ./.env)")
+    p.add_argument("--no-save-results", action="store_true",
+                   help="do not persist results to the results database, even if RESULTS_DB_HOST is set")
     return p.parse_args(argv)
 
 
@@ -44,11 +48,22 @@ def main(argv=None) -> int:
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
+    started_at = datetime.now(timezone.utc)
     results = engine.run()
+    finished_at = datetime.now(timezone.utc)
     if args.format == "json":
         print(json.dumps([asdict(r) for r in results], indent=2, ensure_ascii=False))
     else:
         print_text(args.project, args.env, results)
+    if not args.no_save_results:
+        store = ResultsStore.from_env()
+        if store:
+            try:
+                with store:
+                    run_id = store.save(args.project, args.env, results, started_at, finished_at)
+                print(f"Results saved to results DB (run #{run_id})", file=sys.stderr)
+            except ResultsStoreError as exc:
+                print(f"Warning: could not save results: {exc}", file=sys.stderr)
     return 1 if any(r.status == FAIL for r in results) else 0
 
 

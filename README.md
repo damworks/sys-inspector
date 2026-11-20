@@ -16,12 +16,53 @@ config/projects/*.yaml  one file per project
 
 ## Setup
 ```bash
-cp .env.example .env          # fill in the values (never commit it)
-pip install -r requirements.txt
-python main.py --project my_project --env production
+git clone git@github.com:damworks/sys-inspector.git
+cd sys-inspector
+
+cp .env.example .env                                            # fill in the values (never commit it)
+cp config/projects/my_project.yaml config/projects/your_project.yaml  # edit: name, paths, patterns, commands
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python main.py --project your_project --env production
 ```
+`config/projects/*.yaml` (except `my_project.yaml`) and `.env` are gitignored: every clone needs its own copies
+with real values, they are never pushed to the repo.
+
+To use the plain `python main.py ...` form, activate the virtualenv first in that shell
+(`source .venv/bin/activate`, then `python main.py ...`; `deactivate` when done).
+
 Options: `--only ssh_disk_usage` (check type or name, repeatable), `--format json`, `--config-dir`, `--env-file`.
+Logging goes to stderr (never mixed with the report on stdout/`--format json`): warnings and tracebacks by default,
+`-v/--verbose` adds executed commands and timings, `--log-file PATH` also writes to a file.
 Exit codes: `0` all OK/WARN, `1` at least one FAIL, `2` configuration error (e.g. missing variable).
+
+## Scheduling with cron
+Cron does not run an interactive shell, so it has no `PATH`/venv activation. Always use absolute paths
+(matching where you actually cloned the repo on that machine), redirect output to a log file, and guard
+against overlapping runs with `flock`.
+
+```bash
+#!/bin/bash
+# run_cron.sh
+set -euo pipefail
+cd /opt/sys-inspector        # adjust to your clone path
+
+LOGFILE="/var/log/sys-inspector/$(date +%F).log"
+mkdir -p "$(dirname "$LOGFILE")"
+
+exec flock -n /tmp/sys-inspector.lock \
+  .venv/bin/python main.py \
+    --project your_project --env production \
+    --env-file /opt/sys-inspector/.env \
+    >> "$LOGFILE" 2>&1
+```
+```
+# crontab -e
+0 7 * * * /opt/sys-inspector/run_cron.sh
+```
+`.env` and `config/projects/your_project.yaml` must already exist on that machine (Setup above), and `run_cron.sh`
+needs to be executable (`chmod +x run_cron.sh`).
 
 ## Docker
 ```bash
@@ -33,11 +74,77 @@ absolute path as on the host, so `*_SSH_KEY_PATH` and `SSH_KNOWN_HOSTS` in `.env
 e.g. `/home/you/.ssh/id_ed25519`; `~` is not expanded to your home inside the container).
 Variables already present in the environment (CI, `docker run -e`) take precedence over `.env`.
 
+## Storing results
+Every run can optionally be persisted to a central MariaDB/MySQL database (two tables: `inspection_runs` one row
+per run, `inspection_results` one row per check). This is fully opt-in and separate from the per-project database
+that checks read from.
+
+Enable it by setting `RESULTS_DB_HOST` (and `RESULTS_DB_PORT/NAME/USER/PASSWORD`) in `.env`; leave `RESULTS_DB_HOST`
+empty/unset to disable it (nothing is saved, no connection is attempted). Pass `--no-save-results` to skip saving for
+a single run regardless of configuration. Schema is created automatically on first connection. Saving failures never
+change the check exit code: a warning is printed to stderr and the process still exits based on check results only.
+
+To run the database locally via Docker:
+```bash
+docker compose up -d results-db
+docker compose run --rm inspector --project my_project --env staging
+```
+`results-db` is a MariaDB container with a named volume (`results-db-data`) for persistence. The `inspector` service
+reaches it over the Compose network (`results-db:3306`); local/venv runs reach it via the host-published port
+(`RESULTS_DB_PORT`, default `3307`, to avoid clashing with a local MySQL/MariaDB install on `3306`).
+
+If `results-db` is unreachable (stopped, wrong host/port, bad credentials) nothing crashes: the check results are
+still printed/exit-coded normally, and a line is printed to **stderr** only, e.g.:
+```
+Warning: could not save results: Results DB connection failed: (2003, "Can't connect to MySQL server on ...")
+```
+This means a cron job must redirect stderr to a log file (see `run_cron.sh` above) to actually notice it.
+
+### Browsing the data
+Connect with a MySQL/MariaDB client, either from the host (via the published port, default `3307`):
+```bash
+mysql -h 127.0.0.1 -P 3307 -u sys_inspector -p sys_inspector
+```
+or from inside the container (no local client needed):
+```bash
+docker compose exec results-db mariadb -u sys_inspector -p sys_inspector
+```
+
+`inspection_runs` has **one row per run** (aggregated `ok_count`/`warn_count`/`fail_count`);
+`inspection_results` has **one row per individual check** of that run, linked by `run_id`.
+
+Recent runs:
+```sql
+SELECT id, project, environment, host, overall_status, started_at
+FROM inspection_runs
+ORDER BY started_at DESC
+LIMIT 20;
+```
+
+Per-check detail of a run (join):
+```sql
+SELECT r.project, r.environment, r.started_at,
+       res.check_name, res.check_type, res.status, res.summary
+FROM inspection_runs r
+JOIN inspection_results res ON res.run_id = r.id
+WHERE r.id = 3
+ORDER BY res.id;
+```
+
+Full history, one row per check, most recent first:
+```sql
+SELECT r.project, r.environment, r.started_at, res.check_name, res.status, res.summary
+FROM inspection_runs r
+JOIN inspection_results res ON res.run_id = r.id
+ORDER BY r.started_at DESC, res.id;
+```
+
 ## Available checks
 | type | main parameters |
 |---|---|
 | `ssh_disk_usage` | `paths` (relative to `ssh.workdir`), `top` → `du -h --max-depth=1 <path> \| sort -hr` |
 | `console_command` | `command`, `expect_exit_code`, `fail_if_contains`, `warn_if_contains` |
+| `supervisor_status` | `config` (default `~/etc/supervisor/supervisord.conf`), `timeout` (seconds, default 30) → `supervisorctl -c <config> status`, FAIL if any worker is not `RUNNING` |
 | `db_table_analysis` | `pattern` (LIKE), `must_exist`, `exact_count`, `warn_total_mb`, `fail_total_mb` |
 
 New check: subclass `Check` in `core/checks.py` and decorate it with `@register`.

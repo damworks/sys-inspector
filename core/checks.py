@@ -113,6 +113,41 @@ class ConsoleCommand(Check):
 
 
 @register
+class SupervisorStatus(Check):
+    """supervisorctl status: every process must be RUNNING."""
+
+    type = "supervisor_status"
+    needs = "ssh"
+
+    def run(self, ctx: Context) -> CheckResult:
+        conf = self.spec.get("config", "~/etc/supervisor/supervisord.conf")
+        # Keep a leading "~/" unquoted so the remote shell expands it
+        if conf.startswith("~/"):
+            conf_arg = "~/" + shlex.quote(conf[2:])
+        else:
+            conf_arg = shlex.quote(conf)
+        res = ctx.ssh.run(
+            f"supervisorctl -c {conf_arg} status", ctx.workdir, int(self.spec.get("timeout", 30))
+        )
+        output = (res.stdout + res.stderr).strip()
+        # supervisorctl exits non-zero (3) when some process is not RUNNING: parse the output instead
+        procs = [l.split() for l in res.stdout.strip().splitlines() if len(l.split()) >= 2]
+        if not procs:
+            return CheckResult(
+                self.name, self.type, FAIL, f"No workers found (exit code {res.exit_code})",
+                output.splitlines(),
+            )
+        bad = [p for p in procs if p[1] != "RUNNING"]
+        status = FAIL if bad else OK
+        summary = (
+            f"{len(bad)}/{len(procs)} workers not RUNNING"
+            if bad
+            else f"{len(procs)} workers RUNNING"
+        )
+        return CheckResult(self.name, self.type, status, summary, output.splitlines())
+
+
+@register
 class DBTableAnalysis(Check):
     """Existence, row count and size of tables matching a LIKE pattern."""
 

@@ -16,6 +16,10 @@ checks:
     expect_exit_code: 0
     # warn_if_contains: failed
 
+  - name: Supervisor workers
+    type: supervisor_status
+    # config: ~/etc/supervisor/supervisord.conf   # default
+
   - name: application_logs tables
     type: db_table_analysis
     pattern: "application_logs%"   # LIKE: '_' is a wildcard

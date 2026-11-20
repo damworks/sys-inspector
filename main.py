@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -28,7 +29,21 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--env-file", type=Path, help=".env file (default: ./.env)")
     p.add_argument("--no-save-results", action="store_true",
                    help="do not persist results to the results database, even if RESULTS_DB_HOST is set")
+    p.add_argument("-v", "--verbose", action="store_true", help="log executed commands and timings (stderr)")
+    p.add_argument("--log-file", type=Path, help="also write logs to this file")
     return p.parse_args(argv)
+
+
+def setup_logging(verbose: bool, log_file: Path | None) -> None:
+    """Logs go to stderr (never mixed with the report on stdout)."""
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    if log_file:
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+    )
 
 
 def print_text(project: str, env: str, results) -> None:
@@ -43,6 +58,11 @@ def print_text(project: str, env: str, results) -> None:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    try:
+        setup_logging(args.verbose, args.log_file)
+    except OSError as exc:
+        print(f"Cannot open log file: {exc}", file=sys.stderr)
+        return 2
     try:
         engine = Engine(args.project, args.env, args.config_dir, args.env_file, args.only)
     except ConfigError as exc:

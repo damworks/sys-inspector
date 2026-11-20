@@ -126,7 +126,9 @@ class SupervisorStatus(Check):
             conf_arg = "~/" + shlex.quote(conf[2:])
         else:
             conf_arg = shlex.quote(conf)
-        res = ctx.ssh.run(f"supervisorctl -c {conf_arg} status", ctx.workdir)
+        res = ctx.ssh.run(
+            f"supervisorctl -c {conf_arg} status", ctx.workdir, int(self.spec.get("timeout", 30))
+        )
         output = (res.stdout + res.stderr).strip()
         # supervisorctl exits non-zero (3) when some process is not RUNNING: parse the output instead
         procs = [l.split() for l in res.stdout.strip().splitlines() if len(l.split()) >= 2]

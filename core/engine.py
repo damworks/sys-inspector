@@ -1,6 +1,7 @@
 """Orchestration engine: config + .env -> connections -> checks -> results."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +12,7 @@ from .db_client import DBClient, DBError
 from .ssh_client import SSHClient, SSHError
 from .ssh_tunnel import SSHTunnel, TunnelError
 
+log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -94,13 +96,24 @@ class Engine:
                         if kind == "db" and ctx.tunnel:
                             ctx.tunnel.close()
                             ctx.tunnel = None
+                        log.warning("Connection '%s' unavailable: %s", kind, exc)
                         failed[kind] = f"Connection not available: {exc}"
                         results.append(CheckResult(check.name, check.type, FAIL, failed[kind]))
                         continue
                 try:
+                    log.debug("Running check '%s' (%s)", check.name, check.type)
                     results.append(check.run(ctx))
                 except (SSHError, DBError) as exc:
+                    log.warning("Check '%s' failed: %s", check.name, exc)
                     results.append(CheckResult(check.name, check.type, FAIL, str(exc)))
+                except Exception as exc:  # a buggy check must not abort the whole run
+                    log.exception("Unexpected error in check '%s'", check.name)
+                    results.append(
+                        CheckResult(
+                            check.name, check.type, FAIL,
+                            f"Unexpected error: {type(exc).__name__}: {exc}",
+                        )
+                    )
         finally:
             for c in (ctx.db, ctx.tunnel, ctx.ssh):
                 if c:

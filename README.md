@@ -33,6 +33,8 @@ To use the plain `python main.py ...` form, activate the virtualenv first in tha
 (`source .venv/bin/activate`, then `python main.py ...`; `deactivate` when done).
 
 Options: `--only ssh_disk_usage` (check type or name, repeatable), `--format json`, `--config-dir`, `--env-file`.
+Logging goes to stderr (never mixed with the report on stdout/`--format json`): warnings and tracebacks by default,
+`-v/--verbose` adds executed commands and timings, `--log-file PATH` also writes to a file.
 Exit codes: `0` all OK/WARN, `1` at least one FAIL, `2` configuration error (e.g. missing variable).
 
 ## Scheduling with cron
@@ -142,7 +144,7 @@ ORDER BY r.started_at DESC, res.id;
 |---|---|
 | `ssh_disk_usage` | `paths` (relative to `ssh.workdir`), `top` → `du -h --max-depth=1 <path> \| sort -hr` |
 | `console_command` | `command`, `expect_exit_code`, `fail_if_contains`, `warn_if_contains` |
-| `supervisor_status` | `config` (default `~/etc/supervisor/supervisord.conf`) → `supervisorctl -c <config> status`, FAIL if any worker is not `RUNNING` |
+| `supervisor_status` | `config` (default `~/etc/supervisor/supervisord.conf`), `timeout` (seconds, default 30) → `supervisorctl -c <config> status`, FAIL if any worker is not `RUNNING` |
 | `db_table_analysis` | `pattern` (LIKE), `must_exist`, `exact_count`, `warn_total_mb`, `fail_total_mb` |
 
 New check: subclass `Check` in `core/checks.py` and decorate it with `@register`.

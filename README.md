@@ -142,6 +142,7 @@ ORDER BY r.started_at DESC, res.id;
 |---|---|
 | `ssh_disk_usage` | `paths` (relative to `ssh.workdir`), `top` → `du -h --max-depth=1 <path> \| sort -hr` |
 | `console_command` | `command`, `expect_exit_code`, `fail_if_contains`, `warn_if_contains` |
+| `supervisor_status` | `config` (default `~/etc/supervisor/supervisord.conf`) → `supervisorctl -c <config> status`, FAIL if any worker is not `RUNNING` |
 | `db_table_analysis` | `pattern` (LIKE), `must_exist`, `exact_count`, `warn_total_mb`, `fail_total_mb` |
 
 New check: subclass `Check` in `core/checks.py` and decorate it with `@register`.
